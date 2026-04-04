@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Reservaciones - Privada Santa Ana</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700&family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+        import { getDatabase, ref, push, onValue, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDxfWk9r69SSR1CigJEJx94kHsADGrAk6Q",
+            authDomain: "reservaciones-e9e42.firebaseapp.com",
+            databaseURL: "https://reservaciones-e9e42-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "reservaciones-e9e42",
+            storageBucket: "reservaciones-e9e42.firebasestorage.app",
+            messagingSenderId: "767464851134",
+            appId: "1:767464851134:web:27d1af33ec7fb011c0c0ef"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        let reservasGlobal = {};
+        let esAdmin = false;
+
+        window.mostrarPantalla = function(id, btn) {
+            document.querySelectorAll('.pantalla').forEach(p => p.classList.remove('activa'));
+            document.getElementById(id).classList.add('activa');
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('activa'));
+            btn.classList.add('activa');
+        };
+
+        window.toggleAdmin = function() {
+            if (!esAdmin) {
+                const pass = prompt("Introduce la clave de administrador:");
+                if (pass === "3010") { // Cambia "1234" por tu clave preferida
+                    esAdmin = true;
+                    document.getElementById('btn-admin').innerText = "🔓 Modo Admin ON";
+                    document.getElementById('btn-admin').style.background = "#991b1b";
+                } else {
+                    alert("Clave incorrecta");
+                }
+            } else {
+                esAdmin = false;
+                document.getElementById('btn-admin').innerText = "🔒 Modo Admin OFF";
+                document.getElementById('btn-admin').style.background = "#64748b";
+            }
+            window.buscarReservas();
+        };
+
+        window.eliminarReserva = function(id) {
+            if (confirm("¿Seguro que deseas eliminar esta reservación?")) {
+                remove(ref(db, 'reservas/' + id));
+            }
+        };
+
+        const t12 = (h24) => {
+            if (!h24) return "";
+            let [h, m] = h24.split(':');
+            h = parseInt(h);
+            return `${h % 12 || 12}:${m} ${h >= 12 ? 'PM' : 'AM'}`;
+        };
+
+        const formatearFecha = (f) => f.split('-').reverse().join('/');
+
+        function actualizarFiltroAnios() {
+            const selectAnio = document.getElementById('fAnio');
+            const aniosEnDB = new Set();
+            aniosEnDB.add(new Date().getFullYear().toString()); 
+            Object.values(reservasGlobal).forEach(r => {
+                if(r.fecha) {
+                    const anio = r.fecha.split('-')[0];
+                    if(anio.length === 4) aniosEnDB.add(anio);
+                }
+            });
+            const valorPrevio = selectAnio.value;
+            selectAnio.innerHTML = '<option value="">Todo</option>';
+            Array.from(aniosEnDB).sort().forEach(anio => {
+                selectAnio.innerHTML += `<option value="${anio}">${anio}</option>`;
+            });
+            selectAnio.value = valorPrevio || "";
+        }
+
+        window.reservar = function () {
+            const nombreSel = document.getElementById('nombre');
+            const fechaInput = document.getElementById('fecha');
+            const inicioInput = document.getElementById('horaInicio');
+            const finInput = document.getElementById('horaFin');
+            const checks = document.querySelectorAll('.area-check:checked');
+            const msg = document.getElementById('mensaje');
+
+            const nombre = nombreSel.value;
+            const areas = Array.from(checks).map(c=>c.value);
+            const fecha = fechaInput.value;
+            const inicio = inicioInput.value;
+            const fin = finInput.value;
+
+            if(!nombre || areas.length == 0 || !fecha || !inicio || !fin){
+                msg.innerHTML = '<div class="alerta error">⚠️ Por favor, llena todos los campos.</div>';
+                return;
+            }
+
+            let conflicto = false;
+            for (let id in reservasGlobal) {
+                const r = reservasGlobal[id];
+                if (r.fecha === fecha && inicio < r.fin && fin > r.inicio) {
+                    const areaOcupada = areas.find(a => r.areas.includes(a));
+                    if (areaOcupada) {
+                        msg.innerHTML = `
+                            <div class="alerta error">
+                                ❌ <b>No disponible:</b> El área <b>${areaOcupada}</b> ya está apartada por <b>${r.nombre}</b>.
+                            </div>`;
+                        conflicto = true; 
+                        break;
+                    }
+                }
+            }
+
+            if (!conflicto) {
+                push(ref(db, 'reservas'), {nombre, areas, fecha, inicio, fin})
+                    .then(() => {
+                        msg.innerHTML = `
+                            <div class="alerta exito">
+                                <p><strong>✅ ¡Reservación guardada!</strong></p>
+                                <p style="font-size: 12px; margin-top: 5px;">📢 <strong>Recordatorio:</strong> Es obligatorio dejar la <strong>palapa y baños limpios</strong>. Los <strong>botes de basura</strong> deben quedar vacíos.</p>
+                            </div>`;
+                        
+                        nombreSel.value = ""; fechaInput.value = ""; inicioInput.value = ""; finInput.value = "";
+                        checks.forEach(c => c.checked = false);
+                        setTimeout(() => { msg.innerHTML = ""; }, 10000);
+                    });
+            }
+        };
+
+        window.buscarReservas = function() {
+            const tabla = document.getElementById('tabla');
+            const d = document.getElementById('fDia').value.padStart(2,'0');
+            const m = document.getElementById('fMes').value;
+            const a = document.getElementById('fAnio').value;
+            
+            tabla.innerHTML = '';
+            const lista = Object.entries(reservasGlobal).sort((x,y) => x[1].fecha.localeCompare(y[1].fecha) || x[1].inicio.localeCompare(y[1].inicio));
+            
+            let encontradas = 0;
+            lista.forEach(([id, r]) => {
+                const [rA, rM, rD] = r.fecha.split('-');
+                const coincideDia = !document.getElementById('fDia').value || rD === d;
+                const coincideMes = !m || rM === m;
+                const coincideAnio = !a || rA === a;
+
+                if (coincideDia && coincideMes && coincideAnio) {
+                    encontradas++;
+                    tabla.innerHTML += `
+                        <div class="card-reserva">
+                            <div style="display: flex; justify-content: space-between; align-items: start;">
+                                <div>
+                                    <strong>${r.nombre}</strong><br>
+                                    <span>📅 ${formatearFecha(r.fecha)} | ⏰ ${t12(r.inicio)} - ${t12(r.fin)}</span>
+                                    <div class="badges">${r.areas.map(area => `<span class="badge">${area}</span>`).join('')}</div>
+                                </div>
+                                ${esAdmin ? `<button onclick="eliminarReserva('${id}')" style="background:#fecaca; color:#991b1b; border:none; padding:5px 8px; border-radius:5px; font-size:0.7rem; cursor:pointer; font-weight:bold;">🗑️ Borrar</button>` : ''}
+                            </div>
+                        </div>`;
+                }
+            });
+
+            if(encontradas === 0) {
+                tabla.innerHTML = '<p style="text-align:center; color:#64748b; font-size:0.9rem; margin-top:20px;">No hay reservaciones con estos filtros.</p>';
+            }
+        };
+
+        onValue(ref(db, 'reservas'), (snapshot) => {
+            reservasGlobal = snapshot.val() || {};
+            actualizarFiltroAnios();
+            window.buscarReservas();
+        });
+    </script>
+
+    <style>
+        :root { --p: #2D6A4F; --s: #FF7F50; --t: #008080; --bg: #f8fafc; --border: #334155; }
+        body { font-family: 'Poppins', sans-serif; margin: 0; background-color: var(--bg); padding-bottom: 80px; }
+        .header { background: linear-gradient(135deg, var(--p), var(--t)); color: white; padding: 25px 20px; text-align: center; border-radius: 0 0 20px 20px; position: relative;}
+        .header h1 { font-family: 'Montserrat', sans-serif; margin: 0; font-size: 1.3rem; text-transform: uppercase; }
+        #btn-admin { position: absolute; top: 10px; right: 10px; background: #64748b; color: white; border: none; padding: 4px 8px; border-radius: 5px; font-size: 0.6rem; cursor: pointer; opacity: 0.8; }
+        .container { padding: 15px; max-width: 480px; margin: auto; }
+        .pantalla { display: none; }
+        .pantalla.activa { display: block; }
+        .card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 15px; border: 1.5px solid #cbd5e1; }
+        h3 { color: var(--p); font-size: 1rem; margin: 0 0 15px; border-bottom: 2px solid #f1f5f9; padding-bottom: 5px; }
+        label { display: block; font-size: 0.8rem; font-weight: 600; margin: 10px 0 4px; color: #1e293b; }
+        
+        select, input { 
+            width: 100%; padding: 10px; border-radius: 8px; border: 2px solid var(--border); 
+            font-family: inherit; font-size: 0.9rem; box-sizing: border-box; 
+        }
+
+        .time-container { display: flex; gap: 8px; width: 100%; }
+        .time-field { flex: 1; }
+        .time-field input { padding: 8px; font-size: 0.85rem; text-align: center; }
+
+        .areas-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+        .area-item { background: #f1f5f9; border: 2px solid var(--border); border-radius: 10px; padding: 8px; text-align: center; font-size: 0.7rem; cursor: pointer; }
+        .area-item input { display: none; }
+        .area-item:has(input:checked) { background: #fff7ed; border-color: var(--s); color: var(--s); font-weight: 700; }
+        
+        .btn-confirmar { background: var(--s); color: white; border: none; font-weight: 700; margin-top: 15px; padding: 12px; border-radius: 10px; width: 100%; cursor: pointer; }
+        .btn-buscar { background: var(--t); color: white; border: none; font-weight: 700; margin-top: 12px; padding: 10px; border-radius: 8px; width: 100%; cursor: pointer; font-size: 0.85rem; }
+
+        .card-reserva { background: white; padding: 10px; border-radius: 10px; margin-bottom: 8px; border: 1px solid #e2e8f0; border-left: 5px solid var(--t); }
+        .badge { background: #f0fdfa; color: var(--t); padding: 2px 6px; border-radius: 5px; font-size: 0.6rem; font-weight: 600; margin-right: 3px; border: 1px solid #ccfbf1; }
+        
+        .alerta { padding: 12px; border-radius: 8px; margin-top: 15px; font-size: 0.85rem; line-height: 1.4; }
+        .error { background: #fef2f2; color: #991b1b; border: 1.5px solid #fca5a5; }
+        .exito { background: #f0fff4; color: #166534; border-left: 5px solid #22c55e; border: 1px solid #bcf0c4; }
+        
+        .nav-tabs { position: fixed; bottom: 0; width: 100%; background: white; display: flex; border-top: 1px solid #e2e8f0; }
+        .tab { flex: 1; padding: 15px; text-align: center; font-size: 0.8rem; color: #64748b; cursor: pointer; }
+        .tab.activa { color: var(--p); font-weight: 700; border-top: 3px solid var(--p); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏝️ Privada Santa Ana</h1>
+        <button id="btn-admin" onclick="toggleAdmin()">🔒 Modo Admin OFF</button>
+    </div>
+    <div class="container">
+        <div id="pantalla-registro" class="pantalla activa">
+            <div class="card">
+                <h3>🌺 Reservar Espacio</h3>
+                <label>📍 Selecciona tu Casa</label>
+                <select id="nombre">
+                    <option value="">-- Seleccionar --</option>
+                    <script>
+                        const casas = ["Bernarda", "Alejandro Morales", "Oscar Aparicio", "Jose Peña", "Mayra Portilla", "Belgica Madrigal", "Alicia Peregrina", "Alejandra Rosales", "Jorge Balboa", "Krizia Celis", "Karem Zetina", "Fernando Jasso", "Jazmin Mtz", "Arturo Mendoza", "Enrique Cayetano", "Susana Chan", "Humberto Ramirez", "Rigoberto Rosales", "Orlando Cardona", "Jesus Escasena", "Erika Barrientos", "Agustín Escobar"];
+                        casas.forEach((c, i) => document.write(`<option value="Casa ${i+1} - ${c}">Casa ${i+1} - ${c}</option>`));
+                    </script>
+                </select>
+                <label>☀️ Área</label>
+                <div class="areas-grid">
+                    <label class="area-item"><input type="checkbox" class="area-check" value="Alberca">🏊<br>Alberca</label>
+                    <label class="area-item"><input type="checkbox" class="area-check" value="Palapa">🏖️<br>Palapa</label>
+                    <label class="area-item"><input type="checkbox" class="area-check" value="Baño">🚽<br>Baños</label>
+                </div>
+                <label>📅 Fecha</label>
+                <input type="date" id="fecha">
+                <div class="time-container">
+                    <div class="time-field">
+                        <label>⏰ Horario de Inicio</label>
+                        <input type="time" id="horaInicio">
+                    </div>
+                    <div class="time-field">
+                        <label>⏱️ Horario de Fin</label>
+                        <input type="time" id="horaFin">
+                    </div>
+                </div>
+                <button class="btn-confirmar" onclick="reservar()">Agendar Reservación</button>
+                <div id="mensaje"></div>
+            </div>
+        </div>
+
+        <div id="pantalla-consulta" class="pantalla">
+            <div class="card">
+                <h3>📅 Calendario</h3>
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px;">
+                    <select id="fDia">
+                        <option value="">Todo</option>
+                        <script>for(let i=1;i<=31;i++) document.write(`<option value="${i}">${i}</option>`);</script>
+                    </select>
+                    <select id="fMes">
+                        <option value="">Todo</option>
+                        <option value="01">Ene</option><option value="02">Feb</option><option value="03">Mar</option><option value="04">Abr</option>
+                        <option value="05">May</option><option value="06">Jun</option><option value="07">Jul</option><option value="08">Ago</option>
+                        <option value="09">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dic</option>
+                    </select>
+                    <select id="fAnio">
+                        <option value="">Todo</option>
+                    </select>
+                </div>
+                <button class="btn-buscar" onclick="buscarReservas()">🔍 Buscar Reservaciones</button>
+            </div>
+            <div id="tabla"></div>
+        </div>
+    </div>
+
+    <div class="nav-tabs">
+        <div class="tab activa" onclick="mostrarPantalla('pantalla-registro', this)">✨ Reservar</div>
+        <div class="tab" onclick="mostrarPantalla('pantalla-consulta', this)">📋 Consultar</div>
+    </div>
+</body>
+</html>
