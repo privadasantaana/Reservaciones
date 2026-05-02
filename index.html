@@ -164,30 +164,60 @@
             }
         };
 
+        // --- FUNCIÓN MODIFICADA PARA BUSCAR PASADAS ---
         window.buscarReservas = function() {
-            const tabla = document.getElementById('tabla'), hoy = new Date().toISOString().split('T')[0];
-            const d = document.getElementById('fDia').value.padStart(2,'0'), m = document.getElementById('fMes').value, a = document.getElementById('fAnio').value;
+            const tabla = document.getElementById('tabla');
+            const hoy = new Date().toISOString().split('T')[0];
+            
+            // Valores de los filtros
+            const fDia = document.getElementById('fDia').value;
+            const fMes = document.getElementById('fMes').value;
+            const fAnio = document.getElementById('fAnio').value;
+            
+            // Si el usuario seleccionó algo en los filtros, consideramos que está "buscando"
+            const estaBuscando = fDia !== "" || fMes !== "" || fAnio !== "";
+
             tabla.innerHTML = '';
             const lista = Object.entries(reservasGlobal).sort((x,y) => x[1].fecha.localeCompare(y[1].fecha) || x[1].inicio.localeCompare(y[1].inicio));
+            
             let enc = 0;
             lista.forEach(([id, r]) => {
                 const [rA, rM, rD] = r.fecha.split('-');
-                if ((!document.getElementById('fDia').value || rD===d) && (!m || rM===m) && (!a || rA===a) && r.fecha >= hoy) {
+                
+                // Verificamos si coincide con los filtros seleccionados
+                const coincideDia = !fDia || rD === fDia.padStart(2,'0');
+                const coincideMes = !fMes || rM === fMes;
+                const coincideAnio = !fAnio || rA === fAnio;
+
+                // Lógica: Mostrar si coincide con filtros Y (es futura O el usuario está buscando activamente)
+                if (coincideDia && coincideMes && coincideAnio && (r.fecha >= hoy || estaBuscando)) {
                     enc++;
-                    tabla.innerHTML += `<div class="card-reserva">
+                    const esPasada = r.fecha < hoy;
+                    
+                    tabla.innerHTML += `
+                    <div class="card-reserva" style="${esPasada ? 'opacity: 0.7; border-left: 5px solid #64748b;' : ''}">
                         <div style="display:flex; justify-content:space-between; align-items:start;">
-                            <div><strong>${r.nombre}</strong><br><span>📅 ${r.fecha.split('-').reverse().join('/')} | ⏰ ${t12(r.inicio)} - ${t12(r.fin)}</span><br>${r.areas.map(x=>`<span class="badge">${x}</span>`).join('')}</div>
+                            <div>
+                                ${esPasada ? '<small style="color:#64748b; font-weight:bold;">⏳ PASADA</small><br>' : ''}
+                                <strong>${r.nombre}</strong><br>
+                                <span>📅 ${r.fecha.split('-').reverse().join('/')} | ⏰ ${t12(r.inicio)} - ${t12(r.fin)}</span><br>
+                                ${r.areas.map(x=>`<span class="badge">${x}</span>`).join('')}
+                            </div>
                             ${esAdmin ? `<div style="text-align:right;"><small style="color:#991b1b; font-weight:bold;">${id.slice(-5).toUpperCase()}</small><br><button onclick="eliminarReservaAdmin('${id}')" style="border:none; background:#fecaca; padding:4px; border-radius:4px; cursor:pointer;">🗑️</button></div>` : ''}
                         </div>
                     </div>`;
                 }
             });
-            if(enc===0) tabla.innerHTML = '<p style="text-align:center; color:#64748b; font-size:0.8rem;">Sin reservaciones próximas.</p>';
+            
+            if(enc===0) {
+                tabla.innerHTML = estaBuscando 
+                    ? '<p style="text-align:center; color:#64748b; font-size:0.8rem;">No se encontraron reservaciones para esa fecha.</p>'
+                    : '<p style="text-align:center; color:#64748b; font-size:0.8rem;">Sin reservaciones próximas.</p>';
+            }
         };
 
         onValue(ref(db, 'reservas'), (s) => { reservasGlobal = s.val() || {}; window.buscarReservas(); });
 
-        // Cargar opciones de casas en el registro
         window.onload = () => {
             const selectNombre = document.getElementById('nombre');
             casas.forEach((c, i) => {
@@ -232,6 +262,7 @@
     <div class="header"><h1>🏝️ Privada Santa Ana</h1><button id="btn-admin" onclick="toggleAdmin()">🔒 Modo Admin OFF</button></div>
     
     <div class="container">
+        <!-- PANTALLA REGISTRO -->
         <div id="pantalla-registro" class="pantalla activa">
             <div class="card">
                 <h3>🌺 Reservar Espacio</h3>
@@ -255,13 +286,27 @@
             </div>
         </div>
 
+        <!-- PANTALLA CONSULTA -->
         <div id="pantalla-consulta" class="pantalla">
             <div class="card">
                 <h3>📅 Calendario</h3>
                 <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px;">
-                    <select id="fDia"><option value="">Día</option><script>for(let i=1;i<=31;i++) document.write(`<option value="${i}">${i}</option>`);</script></select>
-                    <select id="fMes"><option value="">Mes</option><option value="01">Ene</option><option value="02">Feb</option><option value="03">Mar</option><option value="04">Abr</option><option value="05">May</option><option value="06">Jun</option><option value="07">Jul</option><option value="08">Ago</option><option value="09">Sep</option><option value="10">Oct</option><option value="11">Nov</option><option value="12">Dic</option></select>
-                    <select id="fAnio"><option value="">Año</option><option value="2025">2025</option><option value="2026">2026</option></select>
+                    <select id="fDia">
+                        <option value="">Día</option>
+                        <script>for(let i=1;i<=31;i++) document.write(`<option value="${i}">${i}</option>`);</script>
+                    </select>
+                    <select id="fMes">
+                        <option value="">Mes</option>
+                        <option value="01">Ene</option><option value="02">Feb</option><option value="03">Mar</option>
+                        <option value="04">Abr</option><option value="05">May</option><option value="06">Jun</option>
+                        <option value="07">Jul</option><option value="08">Ago</option><option value="09">Sep</option>
+                        <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dic</option>
+                    </select>
+                    <select id="fAnio">
+                        <option value="">Año</option>
+                        <option value="2025">2025</option>
+                        <option value="2026">2026</option>
+                    </select>
                 </div>
                 <button class="btn-buscar" onclick="buscarReservas()">🔍 Buscar</button>
                 <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
